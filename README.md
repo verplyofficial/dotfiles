@@ -1,126 +1,193 @@
-# Полная установка Arch Linux + Hyprland + Caelestia (с shell и дотами)
-
-### 1. Подключение к WiFi (необязательно)
+### Подключаемся к WiFi (необязательно)
+```bash
 iwctl
 device list
 station устройство scan
 station устройство get-networks
 station устройство connect SSID
 ping google.com
+```
 
-### 2. Установка крупного шрифта (необязательно)
+### Установка крупного шрифта (необязательно)
+```bash
 pacman -S terminus-font
 cd /usr/share/kbd/consolefonts
 setfont ter-u32b.psf.gz
+```
 
-### 3. Разметка диска под UEFI GPT с шифрованием
-Пример для SSD:
-* /dev/nvme0n1p1 → EFI
-* /dev/nvme0n1p2 → шифрованный root
+### Разметка диска под UEFI GPT с шифрованием
+Если вы используете SSD, тогда ваши разделы будут выглядеть примерно так:
+- `/dev/nvme0n1p1`
+- `/dev/nvme0n1p2`
 
+В таком случае замените `/dev/sda` на `/dev/nvme0n1`.
+А разделы `/dev/sda1` и `/dev/sda2` на `/dev/nvme0n1p1` и `/dev/nvme0n1p2`.
+
+```bash
 parted /dev/sda
 mklabel gpt
 mkpart ESP fat32 1Mib 512Mib
 set 1 boot on
+
 mkpart primary
-# file system (ENTER)
+# file system (нажимаем ENTER)
 # start: 513Mib
 # end: 100%
-quit
 
-### 4. Шифрование раздела
+quit
+```
+
+### Шифруем раздел который подготавливался ранее
+```bash
 cryptsetup luksFormat /dev/sda2
+# sda2 – раздел с шифрованием
+# вводим YES большими буквами
+# вводим пароль 2 раза
+
+# Открываем зашифрованный раздел
 cryptsetup open /dev/sda2 luks
+
+# Проверяем разделы
+ls /dev/mapper/*
+
+# Создаем логические разделы внутри зашифрованного раздела
 pvcreate /dev/mapper/luks
 vgcreate main /dev/mapper/luks
-lvcreate -l 100%FREE main -n root
-lvs
 
-### 5. Подготовка разделов и монтирование
+# 100% зашифрованного раздела помещаем в логический раздел root
+lvcreate -l 100%FREE main -n root
+
+# Посмотреть все логические разделы
+lvs
+```
+
+### Подготовка разделов и монтирование
+```bash
+# Форматируем раздел под ext4
 mkfs.ext4 /dev/mapper/main-root
+
+# Форматируем boot раздел под Fat32, на физ.разделе /dev/sda1 лежит boot
 mkfs.fat -F 32 /dev/sda1
+
+# Монтируем разделы для установки системы
 mount /dev/mapper/main-root /mnt
 mkdir /mnt/boot
-mount /dev/sda1 /mnt/boot
 
-### 6. Установка системы
-pacstrap -K /mnt base linux linux-firmware base-devel lvm2 \
+# Монтируем раздел с boot в текущую рабочую папку
+mount /dev/sda1 /mnt/boot
+```
+### Сборка ядра и базовых софтов
+```bash
+# Устанавливаем базовые софты
+pacstrap -K /mnt base linux linux-firmware base-devel lvm2
 dhcpcd net-tools iproute2 networkmanager vim micro efibootmgr iwd
 
-### 7. Настройка системы
+# Генерируем fstab
 genfstab -U /mnt >> /mnt/etc/fstab
+cat /mnt/etc/fstab
+
+# Настройка системы
 arch-chroot /mnt
 
+# Нужно раскомментировать ru_RU и en_US в этом файле
 micro /etc/locale.gen
-# раскомментируйте en_US.UTF-8 и ru_RU.UTF-8
+
+# Генерируем локали
 locale-gen
+
+# Настраиваем время
 ln -sf /usr/share/zoneinfo/Europe/Kiev /etc/localtime
 hwclock --systohc
+
+# Указать имя хоста
 echo "arch" > /etc/hostname
+
+# Укажите пароль для root пользователя
 passwd
+
+# Добавляем нового пользователя и настраиваем права
 useradd -m -G wheel,users,video -s /bin/bash user
 passwd user
 systemctl enable dhcpcd
 systemctl enable iwd.service
 
-### 8. mkinitcpio
 micro /etc/mkinitcpio.conf
-# HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems encrypt lvm2 fsck)
-mkinitcpio -p linux
+# Пересборка ядра. Найдите строку HOOKS=(base udev autodetect modconf kms
+# keyboard keymap consolefont block filesystems fsck)
 
-### 9. Установка загрузчика
+# и замените на:
+
+# HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems encrypt lvm2 fsck)
+
+# Запустить процесс пересборки ядра
+mkinitcpio -p linux
+```
+
+### Установка загрузчика
+```bash
 bootctl install --path=/boot
 cd /boot/loader
 micro loader.conf
-# Вставляем:
+
+# Вставляем в loader.conf следующий конфиг:
 timeout 3
 default arch
-# Создаем /boot/loader/entries/arch.conf:
-title Arch Linux Hyprland
+
+# Создаем конфигурацию для запуска
+cd /boot/loader/entries
+micro arch.conf
+
+# Вставляем в arch.conf следующее:
+# UUID можно узнать командой blkid
+title Arch Linux by ZProger
 linux /vmlinuz-linux
 initrd /initramfs-linux.img
 options rw cryptdevice=UUID=uuid_от_/dev/sda2:main root=/dev/mapper/main-root
-EDITOR=micro visudo
-# раскомментировать %wheel ALL=(ALL:ALL) ALL
 
+# Выдаем права на sudo
+sudo EDITOR=micro visudo
+# После открытия раскомментируйте %wheel ALL=(ALL:ALL) ALL
+
+# Выходим из системы и перезагружаемся
 Ctrl+D
 umount -R /mnt
 reboot
+```
 
----
-
-## 10. Установка Hyprland окружения
-
-### 10.1. Базовые пакеты
+### Установка Hyprland окружения
+```bash
+# Базовые пакеты
 sudo pacman -Syu
 sudo pacman -S git fish
 
-### 10.2. Установка AUR-хелпера paru
+# Установка AUR-хелпера paru
 git clone https://aur.archlinux.org/paru.git
+
 cd paru
+
 makepkg -si
 
-### 10.3. Установка Hyprland и зависимостей
+# Установка Hyprland и зависимостей
 paru -S hyprland xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
 hyprpicker hypridle wl-clipboard cliphist bluez-utils inotify-tools \
 app2unit wireplumber trash-cli foot fastfetch starship btop jq socat \
 imagemagick curl adw-gtk-theme papirus-icon-theme qt5ct qt6ct ttf-jetbrains-mono-nerd
+```
 
-# Либо одним пакетом:
-paru -S caelestia-meta
-
----
-
-## 11. Установка caelestia dotfiles
+### Установка caelestia dotfiles
+```bash
 git clone https://github.com/caelestia-dots/caelestia.git ~/.local/share/caelestia
+
 cd ~/.local/share/caelestia
+
 fish install.fish --paru --noconfirm --vscode=codium --spotify --discord --zen
 
 # ⚠️ Не удаляй папку ~/.local/share/caelestia — там все symlink’и
+```
 
----
 
-## 12. Установка логин-менеджера
+### Установка логин-менеджера
+```bash
 paru -S greetd tuigreet
 sudo micro /etc/greetd/config.toml
 
@@ -133,14 +200,11 @@ command = "tuigreet --time --cmd Hyprland"
 user = "user"
 
 sudo systemctl enable greetd
+```
 
----
-
-## 13. Установка дополнительных зависимостей shell (manual)
-paru -S caelestia-cli quickshell-git ddcutil brightnessctl cava \
-networkmanager lm-sensors aubio libpipewire glibc qt6-declarative \
-gcc-libs material-symbols caskaydia-cove-nerd swappy libqalculate \
-bash qt6-base qt6-declarative app2unit fish cmake ninja
+### Установка дополнительных зависимостей shell (manual)
+```bash
+paru -S caelestia-cli quickshell-git ddcutil brightnessctl cava networkmanager lm-sensors aubio libpipewire glibc qt6-declarative gcc-libs material-symbols caskaydia-cove-nerd swappy libqalculate bash qt6-base qt6-declarative app2unit fish cmake ninja
 
 mkdir -p ~/.config/quickshell
 cd ~/.config/quickshell
@@ -158,10 +222,10 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build build
 sudo cmake --install build
 sudo chown -R $USER ~/.config/quickshell/caelestia
+```
 
----
-
-## 14. Настройка shell и обоев
+### Настройка shell и обоев
+```bash
 # Создаём ~/.config/caelestia/shell.json
 # Здесь можно добавить рекомендуемые опции shell
 
@@ -172,19 +236,18 @@ caelestia wallpaper -f ~/Pictures/Wallpapers/<file>
 caelestia scheme set -n dynamic
 
 # PFP/dashboard: ~/.face
-
----
-
-## 15. Автостарт shell
+```
+### Автостарт shell
+```bash
 Если установлены все caelestia dots, shell запускается автоматически через Hyprland `exec-once`.
 Иначе вручную:
 caelestia shell -d
 # или
 qs -c caelestia
+```
 
----
-
-## 16. Исправления и кастомизация Hyprland
+### Исправления и кастомизация Hyprland
+```bash
 # Отключение мерцания (VRR):
 nano ~/.config/caelestia/hypr-user.conf
 misc {
@@ -193,3 +256,4 @@ misc {
 
 # Добавление своих конфигов Hyprland:
 # ~/.config/caelestia/hypr-user.conf
+```
