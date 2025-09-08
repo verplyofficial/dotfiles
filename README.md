@@ -16,15 +16,8 @@ setfont ter-u32b.psf.gz
 ```
 
 ### Разметка диска под UEFI GPT с шифрованием
-Если вы используете SSD, тогда ваши разделы будут выглядеть примерно так:
-- `/dev/nvme0n1p1`
-- `/dev/nvme0n1p2`
-
-В таком случае замените `/dev/sda` на `/dev/nvme0n1`.
-А разделы `/dev/sda1` и `/dev/sda2` на `/dev/nvme0n1p1` и `/dev/nvme0n1p2`.
-
 ```bash
-parted /dev/sda
+parted /dev/nvme0n1
 mklabel gpt
 mkpart ESP fat32 1Mib 512Mib
 set 1 boot on
@@ -39,13 +32,13 @@ quit
 
 ### Шифруем раздел который подготавливался ранее
 ```bash
-cryptsetup luksFormat /dev/sda2
-# sda2 – раздел с шифрованием
+cryptsetup luksFormat /dev/nvme0n1p2
+# nvme0n1p2 – раздел с шифрованием
 # вводим YES большими буквами
 # вводим пароль 2 раза
 
 # Открываем зашифрованный раздел
-cryptsetup open /dev/sda2 luks
+cryptsetup open /dev/nvme0n1p2 luks
 
 # Проверяем разделы
 ls /dev/mapper/*
@@ -66,15 +59,15 @@ lvs
 # Форматируем раздел под ext4
 mkfs.ext4 /dev/mapper/main-root
 
-# Форматируем boot раздел под Fat32, на физ.разделе /dev/sda1 лежит boot
-mkfs.fat -F 32 /dev/sda1
+# Форматируем boot раздел под Fat32, на физ.разделе /dev/nvme0n1p1 лежит boot
+mkfs.fat -F 32 /dev/nvme0n1p1
 
 # Монтируем разделы для установки системы
 mount /dev/mapper/main-root /mnt
 mkdir /mnt/boot
 
 # Монтируем раздел с boot в текущую рабочую папку
-mount /dev/sda1 /mnt/boot
+mount /dev/nvme0n1p1 /mnt/boot
 ```
 ### Сборка ядра и базовых софтов
 ```bash
@@ -142,7 +135,7 @@ micro arch.conf
 title Arch Linux by ZProger
 linux /vmlinuz-linux
 initrd /initramfs-linux.img
-options rw cryptdevice=UUID=uuid_от_/dev/sda2:main root=/dev/mapper/main-root
+options rw cryptdevice=UUID=uuid_от_/dev/nvme0n1p2:main root=/dev/mapper/main-root
 
 # Выдаем права на sudo
 sudo EDITOR=micro visudo
